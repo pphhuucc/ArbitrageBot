@@ -3,74 +3,124 @@ using ArbitrageBot.Services.Interfaces;
 using ArbitrageBot.Core;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
-Console.WriteLine("🚀 Arbitrage Bot – Bước 3: Phát hiện cơ hội");
+Console.WriteLine("🚀 Arbitrage Bot – Contract Verification (Continuous Mode)");
+Console.WriteLine("⏹️ Nhấn Ctrl+C để dừng\n");
 
-// Khởi tạo danh sách sàn (mới có Binance, sẽ thêm KuCoin sau)
 List<IExchangeService> exchanges = new()
 {
     new BinanceService(),
     new KucoinService()
-    // new KucoinService() // sẽ thêm sau
 };
 
 var engine = new ArbitrageEngine(exchanges);
 var binance = new BinanceService();
+
+Console.WriteLine("🔍 Đang lấy danh sách symbols...");
 var symbols = await binance.GetCommonSymbolsAsync("USDT");
-//symbols = symbols.Take(20).ToList(); // giới hạn để test
+Console.WriteLine($"📋 Tìm thấy {symbols.Count} symbols\n");
 
-Console.WriteLine($"\n🔍 Đang phân tích {symbols.Count} cặp coin...\n");
+int roundCount = 1;
 
-foreach (var symbol in symbols)
+// Quét liên tục
+while (true)
 {
-    var giaTheoSan = new List<(string Exchange, decimal Price)>();
-
-    foreach (var exchange in exchanges)
+    try
     {
-        try
-        {
-            var price = await exchange.GetPriceAsync(symbol);
-            giaTheoSan.Add((exchange.ExchangeName, price));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"⚠️ Không lấy được giá {symbol} từ {exchange.ExchangeName}: {ex.Message}");
-        }
-    }
-
-    if (giaTheoSan.Count < 2)
-    {
-        Console.WriteLine($"⚠️ Không đủ dữ liệu cho {symbol} (ít hơn 2 sàn có giá).");
-        continue;
-    }
-
-    // Hiển thị giá từng sàn
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine($"\n📌 {symbol}");
-    Console.ResetColor();
-
-    foreach (var g in giaTheoSan)
-    {
-        Console.WriteLine($"   🏷️ {g.Exchange,-10}: {g.Price:N5} USD");
-    }
-
-    // Tính arbitrage từ dữ liệu đã có
-    var buy = giaTheoSan.OrderBy(p => p.Price).First();
-    var sell = giaTheoSan.OrderByDescending(p => p.Price).First();
-
-    var profit = (sell.Price - buy.Price) / buy.Price * 100 - 0.2m;
-
-    if (profit > 0.1m)
-    {
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"✅ Cơ hội arbitrage: Mua {buy.Exchange} → Bán {sell.Exchange} = Lãi {Math.Round(profit, 2)}%");
+        Console.ForegroundColor = ConsoleColor.Magenta;
+        Console.WriteLine($"🔄 === LƯỢT QUÉT #{roundCount} === {DateTime.Now:HH:mm:ss} ===");
         Console.ResetColor();
-    }
-    //else
-    //{
-    //    Console.ForegroundColor = ConsoleColor.DarkGray;
-    //    Console.WriteLine($"❌ Không có arbitrage đủ lợi nhuận (chênh lệch: {Math.Round(profit, 2)}%)");
-    //    Console.ResetColor();
-    //}
 
-    await Task.Delay(200); // delay tránh spam API
+        var realOpportunities = new List<string>();
+        int processed = 0;
+
+        foreach (var symbol in symbols.Take(50)) // Quét 50 symbols mỗi lượt để tăng tốc
+        {
+            try
+            {
+                processed++;
+                var opportunity = await engine.FindOpportunityAsync(symbol);
+                
+                if (opportunity == null)
+                {
+                    Console.Write($".");
+                    continue;
+                }
+
+                Console.Write($" {symbol.Replace("/USDT", "")}");
+
+                if (opportunity.ProfitPercent > 0.1m)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($" 💰{opportunity.ProfitPercent}%");
+                    Console.ResetColor();
+
+                    Console.WriteLine($"   🔗 Buy:  {opportunity.BuyContractAddress}");
+                    Console.WriteLine($"   🔗 Sell: {opportunity.SellContractAddress}");
+                    
+                    if (opportunity.IsContractVerified)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"   ✅ VERIFIED ARBITRAGE!");
+                        Console.ResetColor();
+                        realOpportunities.Add($"{symbol} ({opportunity.ProfitPercent}%)");
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"   ⚠️ Different contracts");
+                        Console.ResetColor();
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($" ={opportunity.ProfitPercent:F2}%");
+                }
+
+                // Show progress every 10 symbols
+                if (processed % 10 == 0)
+                {
+                    Console.WriteLine($" [{processed}/50]");
+                }
+
+                await Task.Delay(150); // Delay ngắn hơn
+            }
+            catch (Exception ex)
+            {
+                Console.Write($"x");
+            }
+        }
+
+        // Tổng kết lượt quét
+        Console.WriteLine($"\n📊 Lượt #{roundCount} hoàn thành:");
+        if (realOpportunities.Any())
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"🎯 {realOpportunities.Count} CƠ HỘI VERIFIED:");
+            foreach (var opp in realOpportunities)
+            {
+                Console.WriteLine($"   ✅ {opp}");
+            }
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.WriteLine("   ❌ Không có cơ hội verified nào");
+            Console.ResetColor();
+        }
+
+        roundCount++;
+        
+        // Delay giữa các lượt quét
+        Console.ForegroundColor = ConsoleColor.DarkYellow;
+        Console.WriteLine($"⏳ Nghỉ 30 giây trước lượt tiếp theo...\n");
+        Console.ResetColor();
+        
+        await Task.Delay(30000); // Nghỉ 30 giây
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Lỗi trong lượt quét #{roundCount}: {ex.Message}");
+        await Task.Delay(5000); // Nghỉ 5 giây khi có lỗi
+    }
 }

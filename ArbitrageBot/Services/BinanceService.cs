@@ -1,5 +1,7 @@
 ﻿using ArbitrageBot.Services.Interfaces;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using ccxt;
 
@@ -21,6 +23,7 @@ namespace ArbitrageBot.Services
             dynamic ticker = await _binance.fetchTicker(symbol);
             return Convert.ToDecimal(ticker["last"]);
         }
+        
         public async Task<List<string>> GetCommonSymbolsAsync(string quote = "USDT")
         {
             var symbols = new List<string>();
@@ -36,6 +39,5 @@ namespace ArbitrageBot.Services
 
             return symbols;
         }
-
     }
 }
